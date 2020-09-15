@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 import csv
+import json
 
 import logging
 
@@ -13,6 +14,7 @@ listingUrls=[]
 data=[]
 page=1
 
+GEOCODING_API_KEY=""
 
 ZOLO_TAGS = {
     "listings":["li", {"class": "listing-column"}],
@@ -43,9 +45,10 @@ def getDatafromUrl(url):
     except ValueError:
         return
     secondarySoup = BeautifulSoup(listingPage, 'html.parser')
-    address1 = address2 = walkScore = postalCode = propertyType = style = yearBuilt  = bedrooms = bathrooms = parking = garage = lotDepth = lotFrontage = price =""
+    address1 = address2 = latitude = longitude = walkScore = postalCode = propertyType = style = yearBuilt  = bedrooms = bathrooms = parking = garage = lotDepth = lotFrontage = price =""
     address1 = secondarySoup.find(*ZOLO_TAGS["address1"]).getText().lstrip()
     address2 = secondarySoup.find(*ZOLO_TAGS["address2"]).getText().lstrip()
+    address2 = " ".join(i for i in address2.split(", ")[::-1])
 
     for info in secondarySoup.findAll(*ZOLO_TAGS["sectionListing"]):
         for column in (info.findAll(*ZOLO_TAGS["dl_property"])):
@@ -79,9 +82,21 @@ def getDatafromUrl(url):
                     lotFrontage = column.find(*ZOLO_TAGS["columnValue"]).getText()
             except:
                 logging.error(url+" throwed error")
-    if secondarySoup.find(*ZOLO_TAGS["price"]).find(*ZOLO_TAGS["priv"]).getText().strip().replace(",","")[1:].isnumeric():
-        price = secondarySoup.find(*ZOLO_TAGS["price"]).find(*ZOLO_TAGS["priv"]).getText().strip()[1:]
-    return [url, address1, " ".join(i for i in address2.split(", ")[::-1]), postalCode, walkScore, propertyType, style, yearBuilt, bedrooms, bathrooms, parking, garage, lotDepth, lotFrontage, price]
+    try:
+        if secondarySoup.find(*ZOLO_TAGS["price"]).find(*ZOLO_TAGS["priv"]).getText().strip().replace(",","")[1:].isnumeric():
+            price = secondarySoup.find(*ZOLO_TAGS["price"]).find(*ZOLO_TAGS["priv"]).getText().strip()[1:]
+    except:
+        logging.error(url+" doesn't have price")
+
+    try:
+        location = address1.replace(" ","+")+","+address2.replace(" ","+")
+        data = urlopen(Request('https://maps.googleapis.com/maps/api/geocode/json?address='+location+'+Canada&key='+GEOCODING_API_KEY+'/'')).read()
+        geocode = json.loads(data.decode('utf-8'))
+        latitude = geocode["results"][0]["geometry"]["location"]["lat"]
+        longitude = geocode["results"][0]["geometry"]["location"]["lng"]
+    except:
+        logging.error(url+" doesnt have location/sketchy location")
+    return [url, location, latitude, longitude, postalCode, walkScore, propertyType, style, yearBuilt, bedrooms, bathrooms, parking, garage, lotDepth, lotFrontage, price]
 
 while(True):
     try:
@@ -102,7 +117,7 @@ for url in listingUrls:
 
 with open('data.csv', 'w',newline='') as csvfile:
     writer = csv.writer(csvfile, delimiter=',')
-    writer.writerow(['url','addressline1','addressline2','postalCode', 'walkScore', 'propertyType','style','yearBuilt','bedrooms','bathrooms','parking','garage','lotDepth','lotFrontage','price'])
+    writer.writerow(['url','location','latitude','longitude','postalCode', 'walkScore', 'propertyType','style','yearBuilt','bedrooms','bathrooms','parking','garage','lotDepth','lotFrontage','price'])
     for i in data:
         if i is not None:
             writer.writerows([i])
